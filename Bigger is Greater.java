@@ -23,6 +23,7 @@ public class Solution {
             i--;
             j--;
         }
+        
         if(j<0)
         {
             return "no answer";
