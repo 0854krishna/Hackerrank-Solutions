@@ -1,156 +1,123 @@
-import os
-import json
-from flask import Flask, render_template, request
-import nltk
-from nltk.tokenize import word_tokenize
-from nltk.corpus import stopwords
-import extract_msg
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Knowledge Base Chatbot</title>
 
-# Initialize the Flask app
-app = Flask(__name__)
+    <!-- Bootstrap for styling -->
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 30px;
+        }
+        .container {
+            max-width: 800px;
+        }
+        .card-body {
+            padding: 20px;
+        }
+        .output-box {
+            border: 1px solid #ccc;
+            padding: 10px;
+            min-height: 100px;
+            margin-top: 20px;
+        }
+        .query-box {
+            min-height: 50px;
+            border: 1px solid #ccc;
+            margin-top: 20px;
+        }
+        .response-box {
+            margin-top: 30px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            background-color: #f5f5f5;
+        }
+    </style>
+</head>
+<body>
 
-# Define the path to the knowledge base file
-knowledge_base_file = 'knowledge_base.json'
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <!-- Upload email form -->
+                <div class="card">
+                    <div class="card-header">
+                        <h4>Upload Email (.msg file)</h4>
+                    </div>
+                    <div class="card-body">
+                        <form action="/process" method="POST" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <input type="file" name="email" class="form-control" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Upload Email</button>
+                        </form>
+                    </div>
+                </div>
 
-# Define your directory where `.msg` files are stored
-email_directory = 'C:/Users/YourUsername/Documents/emails'  # Replace with your actual path
+                <!-- Display processed tokens after uploading an email -->
+                {% if tokens %}
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h4>Processed Tokens</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="output-box">
+                            <h5>Extracted Tokens:</h5>
+                            <p>{{ tokens }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
 
-# Define the custom NLTK data path (where you've stored punkt and stopwords)
-nltk_data_path = 'C:/Users/x01358215/nltk_data'  # Replace with your actual NLTK data path
+                <!-- Query Form to interact with the chatbot -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h4>Ask a Question</h4>
+                    </div>
+                    <div class="card-body">
+                        <form action="/query" method="POST">
+                            <div class="form-group">
+                                <textarea name="query" class="form-control query-box" rows="3" placeholder="Ask your question here..." required></textarea>
+                            </div>
+                            <button type="submit" class="btn btn-success">Ask</button>
+                        </form>
+                    </div>
+                </div>
 
-# Set the custom NLTK data path
-nltk.data.path.append(nltk_data_path)
+                <!-- Display Response from the chatbot -->
+                {% if response %}
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h4>Response</h4>
+                    </div>
+                    <div class="card-body">
+                        <div class="response-box">
+                            <h5>Answer:</h5>
+                            <p>{{ response }}</p>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
 
-# Load or initialize the knowledge base
-def load_knowledge_base():
-    if os.path.exists(knowledge_base_file):
-        with open(knowledge_base_file, 'r') as file:
-            return json.load(file)
-    return []  # Return an empty list if no knowledge base exists
+                <!-- Process All Emails in the directory -->
+                <div class="card mt-4">
+                    <div class="card-header">
+                        <h4>Process All Emails</h4>
+                    </div>
+                    <div class="card-body">
+                        <a href="/process_all" class="btn btn-warning">Process All Emails</a>
+                    </div>
+                </div>
 
-# Save knowledge base to a JSON file
-def save_knowledge_base(knowledge_base):
-    with open(knowledge_base_file, 'w') as file:
-        json.dump(knowledge_base, file, indent=4)
+            </div>
+        </div>
+    </div>
 
-# Initialize the knowledge base when the app starts
-knowledge_base = load_knowledge_base()
-
-# Ensure the required NLTK resources are available
-def check_nltk_resources():
-    try:
-        nltk.data.find('tokenizers/punkt')
-        nltk.data.find('corpora/stopwords')
-    except LookupError:
-        return False
-    return True
-
-# Function to process a .msg email file
-def process_email(msg_path):
-    # Extracting email content using extract-msg
-    msg = extract_msg.Message(msg_path)
-    msg_message = msg.body  # Extract email body
-
-    # Preprocess the text (tokenization and stopword removal)
-    tokens = preprocess_text(msg_message)
-
-    # Add to knowledge base and save to file
-    add_to_knowledge_base(tokens)
-    save_knowledge_base(knowledge_base)
-
-    return tokens
-
-# Preprocess the text (tokenization and stopword removal)
-def preprocess_text(text):
-    # Tokenize the text using NLTK's Punkt tokenizer
-    tokens = word_tokenize(text.lower())  # Tokenize and make the text lowercase
-    
-    # Load English stopwords
-    stop_words = set(stopwords.words('english'))
-
-    # Filter tokens: keep only those that are alphanumeric and not stopwords
-    filtered_tokens = [token for token in tokens if token.isalnum() and token not in stop_words]
-    
-    return filtered_tokens
-
-# Add processed tokens to the knowledge base (as a list of important tokens/phrases)
-def add_to_knowledge_base(tokens):
-    # Convert tokens to a string and append it to the knowledge base
-    text = " ".join(tokens)
-    knowledge_base.append(text)
-
-# Basic query answering: Search for keywords in the knowledge base
-def query_knowledge_base(query):
-    query_tokens = word_tokenize(query.lower())
-    
-    # Filter query tokens to remove stopwords
-    stop_words = set(stopwords.words('english'))
-    query_tokens = [token for token in query_tokens if token.isalnum() and token not in stop_words]
-    
-    # Search for the query tokens in the knowledge base
-    responses = []
-    for kb_text in knowledge_base:
-        match = [word for word in query_tokens if word in kb_text]
-        if match:
-            responses.append(kb_text)  # Add the matched text from the knowledge base
-    
-    if responses:
-        return responses
-    else:
-        return ["Sorry, I couldn't find any relevant information in the emails."]
-
-# Automatically process all .msg files in the specified directory
-def process_all_emails():
-    for filename in os.listdir(email_directory):
-        if filename.endswith(".msg"):
-            email_path = os.path.join(email_directory, filename)
-            process_email(email_path)
-
-# Route for the home page
-@app.route('/')
-def index():
-    return render_template('index.html')
-
-# Route to handle file upload (for manual email upload)
-@app.route('/process', methods=['POST'])
-def process():
-    if 'email' not in request.files:
-        return "No file part", 400
-
-    file = request.files['email']
-
-    if file.filename == '':
-        return "No selected file", 400
-
-    if file and file.filename.endswith('.msg'):
-        # Save the uploaded file temporarily
-        filepath = os.path.join('uploads', file.filename)
-        file.save(filepath)
-        
-        # Process the email and add it to the knowledge base
-        tokens = process_email(filepath)
-
-        return render_template('index.html', tokens=tokens)
-
-    return "Invalid file format. Please upload a .msg file.", 400
-
-# Route to handle user query
-@app.route('/query', methods=['POST'])
-def query():
-    query_text = request.form.get('query')
-    
-    # Perform a query against the knowledge base
-    response = query_knowledge_base(query_text)
-
-    return render_template('index.html', response=response, query=query_text)
-
-# Route to automatically process all emails in the directory
-@app.route('/process_all', methods=['GET'])
-def process_all():
-    process_all_emails()
-    return "Processed all emails in the directory."
-
-if __name__ == '__main__':
-    if not check_nltk_resources():
-        return "Required NLTK resources not found. Please ensure 'punkt' and 'stopwords' are installed in the specified path.", 400
-    app.run(debug=True)
+    <!-- Bootstrap JS and dependencies -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>
