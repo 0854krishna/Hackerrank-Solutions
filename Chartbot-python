@@ -1,66 +1,146 @@
-body {
-    font-family: Arial, sans-serif;
-    background-color: #f7f7f7;
-    margin: 0;
-    padding: 0;
-}
+import os
+import re
+import json
+import spacy
+from flask import Flask, render_template, request, jsonify
+from extract_msg import Message  # For reading .msg files
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-.chat-container {
-    width: 400px;
-    margin: 50px auto;
-    border: 1px solid #ccc;
-    border-radius: 10px;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    background-color: white;
-}
+# Load the spaCy model (assumed to be installed and available)
+nlp = spacy.load("en_core_web_md")
 
-.chat-box {
-    display: flex;
-    flex-direction: column;
-    height: 500px;
-}
+# Create a Flask app
+app = Flask(__name__)
 
-.chat-output {
-    flex: 1;
-    padding: 10px;
-    overflow-y: auto;
-    border-bottom: 1px solid #ccc;
-}
+# Path to folder containing .msg files
+EMAIL_FOLDER = 'path_to_msg_folder'
+KNOWLEDGE_BASE_FILE = 'knowledge.json'
 
-.chat-input {
-    padding: 10px;
-    border: none;
-    border-top: 1px solid #ccc;
-    border-radius: 0;
-    width: calc(100% - 80px);
-}
+# Global variable to store knowledge base (summarized emails)
+knowledge_base = []
 
-.send-btn {
-    padding: 10px;
-    border: none;
-    background-color: #007bff;
-    color: white;
-    cursor: pointer;
-    border-radius: 0;
-}
+def clean_email_body(body):
+    """
+    Clean email body by removing common signatures, email chains,
+    and unnecessary phrases.
+    """
+    # 1. Normalize line endings
+    body = body.replace('\r\n', '\n').replace('\r', '\n')
 
-.send-btn:hover {
-    background-color: #0056b3;
-}
+    # 2. Remove email chains (e.g., "On [date], [sender] wrote:")
+    body = re.sub(r'(On\s.*\n?.*wrote:)', '', body)
+    body = re.sub(r'(From:.*\n)', '', body)
+    body = re.sub(r'(Sent:.*\n)', '', body)
+    body = re.sub(r'(To:.*\n)', '', body)
+    body = re.sub(r'(Cc:.*\n)', '', body)
+    body = re.sub(r'(Bcc:.*\n)', '', body)
 
-.user-message {
-    margin: 5px 0;
-    padding: 10px;
-    background-color: #007bff;
-    color: white;
-    border-radius: 5px;
-    align-self: flex-end;
-}
+    # 3. Remove signature lines (e.g., "Best regards", "Thanks", etc.)
+    signature_patterns = [
+        r'Best regards,',
+        r'Thanks,',
+        r'Sent from my iPhone',
+        r'Sincerely,',
+        r'Regards,',
+        r'Cheers,'
+    ]
+    
+    for pattern in signature_patterns:
+        body = re.sub(pattern, '', body, flags=re.IGNORECASE)
 
-.bot-message {
-    margin: 5px 0;
-    padding: 10px;
-    background-color: #e0e0e0;
-    border-radius: 5px;
-    align-self: flex-start;
-}
+    # 4. Remove extra white spaces and newlines
+    body = re.sub(r'\n+', '\n', body).strip()
+
+    return body
+
+def extract_email_content(msg_file_path):
+    """Extract subject, sender, and cleaned body from .msg file"""
+    msg = Message(msg_file_path)
+    subject = msg.subject
+    sender = msg.sender
+    body = clean_email_body(msg.body)
+    return subject, sender, body
+
+def summarize_text(text):
+    """Summarize email content using spaCy"""
+    doc = nlp(text)
+    sentences = [sent.text for sent in doc.sents if len(sent.text.split()) > 5]
+    summary = ' '.join(sentences[:3])  # Use first 3 sentences as summary
+    return summary
+
+def build_knowledge_base():
+    """Read all .msg files and build the knowledge base"""
+    global knowledge_base
+    for filename in os.listdir(EMAIL_FOLDER):
+        if filename.endswith(".msg"):
+            filepath = os.path.join(EMAIL_FOLDER, filename)
+            subject, sender, body = extract_email_content(filepath)
+            summary = summarize_text(body)
+            knowledge_base.append({
+                'filename': filename,
+                'subject': subject,
+                'sender': sender,
+                'summary': summary,
+                'body': body  # Save full body for detailed responses
+            })
+
+def save_knowledge_base_to_json():
+    """Save the knowledge base to a JSON file"""
+    with open(KNOWLEDGE_BASE_FILE, 'w') as json_file:
+        json.dump(knowledge_base, json_file, indent=4)
+    print(f"Knowledge base saved to {KNOWLEDGE_BASE_FILE}")
+
+def search_knowledge_base(query):
+    """Search the knowledge base for relevant information based on the query using TF-IDF"""
+    responses = []
+
+    # Prepare documents (summaries and subjects)
+    documents = [entry['summary'] + " " + entry['subject'] for entry in knowledge_base]
+
+    # Create TF-IDF vectorizer
+    vectorizer = TfidfVectorizer()
+    tfidf_matrix = vectorizer.fit_transform(documents + [query])  # Add query to the documents for comparison
+
+    # Calculate cosine similarity
+    cosine_similarities = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1]).flatten()
+
+    # Get the indices of the most relevant documents
+    relevant_indices = cosine_similarities.argsort()[::-1]  # Sort in descending order
+
+    for idx in relevant_indices:
+        if cosine_similarities[idx] > 0:  # Only consider non-zero similarity scores
+            responses.append({
+                'subject': knowledge_base[idx]['subject'],
+                'summary': knowledge_base[idx]['summary'],
+                'body': knowledge_base[idx]['body']  # Save full body for detailed responses
+            })
+
+    return responses
+
+@app.route('/')
+def index():
+    """Home page for chatbot interaction"""
+    return render_template('chat.html')
+
+@app.route('/query', methods=['POST'])
+def query():
+    """API endpoint to handle chatbot queries"""
+    user_query = request.form['query']
+    results = search_knowledge_base(user_query)
+    
+    if results:
+        return jsonify({
+            'status': 'success',
+            'data': results
+        })
+    else:
+        return jsonify({
+            'status': 'fail',
+            'message': 'No relevant information found in the knowledge base.'
+        })
+
+if __name__ == '__main__':
+    build_knowledge_base()  # Build the knowledge base when app starts
+    save_knowledge_base_to_json()  # Save to JSON file
+    app.run(debug=True)
