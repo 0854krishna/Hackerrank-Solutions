@@ -1,123 +1,132 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Knowledge Base Chatbot</title>
+import os
+import re
+import json
+import spacy
+from flask import Flask, render_template, request, jsonify
+from extract_msg import Message  # For reading .msg files
 
-    <!-- Bootstrap for styling -->
-    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body {
-            padding-top: 30px;
-        }
-        .container {
-            max-width: 800px;
-        }
-        .card-body {
-            padding: 20px;
-        }
-        .output-box {
-            border: 1px solid #ccc;
-            padding: 10px;
-            min-height: 100px;
-            margin-top: 20px;
-        }
-        .query-box {
-            min-height: 50px;
-            border: 1px solid #ccc;
-            margin-top: 20px;
-        }
-        .response-box {
-            margin-top: 30px;
-            padding: 20px;
-            border: 1px solid #ccc;
-            background-color: #f5f5f5;
-        }
-    </style>
-</head>
-<body>
+# Load the spaCy model (assumed to be installed and available)
+nlp = spacy.load("en_core_web_md")
 
-    <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-md-8">
-                <!-- Upload email form -->
-                <div class="card">
-                    <div class="card-header">
-                        <h4>Upload Email (.msg file)</h4>
-                    </div>
-                    <div class="card-body">
-                        <form action="/process" method="POST" enctype="multipart/form-data">
-                            <div class="form-group">
-                                <input type="file" name="email" class="form-control" required>
-                            </div>
-                            <button type="submit" class="btn btn-primary">Upload Email</button>
-                        </form>
-                    </div>
-                </div>
+# Create a Flask app
+app = Flask(__name__)
 
-                <!-- Display processed tokens after uploading an email -->
-                {% if tokens %}
-                <div class="card mt-4">
-                    <div class="card-header">
-                        <h4>Processed Tokens</h4>
-                    </div>
-                    <div class="card-body">
-                        <div class="output-box">
-                            <h5>Extracted Tokens:</h5>
-                            <p>{{ tokens }}</p>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
+# Path to folder containing .msg files
+EMAIL_FOLDER = 'path_to_msg_folder'
+KNOWLEDGE_BASE_FILE = 'knowledge.json'
 
-                <!-- Query Form to interact with the chatbot -->
-                <div class="card mt-4">
-                    <div class="card-header">
-                        <h4>Ask a Question</h4>
-                    </div>
-                    <div class="card-body">
-                        <form action="/query" method="POST">
-                            <div class="form-group">
-                                <textarea name="query" class="form-control query-box" rows="3" placeholder="Ask your question here..." required></textarea>
-                            </div>
-                            <button type="submit" class="btn btn-success">Ask</button>
-                        </form>
-                    </div>
-                </div>
+# Global variable to store knowledge base (summarized emails)
+knowledge_base = []
 
-                <!-- Display Response from the chatbot -->
-                {% if response %}
-                <div class="card mt-4">
-                    <div class="card-header">
-                        <h4>Response</h4>
-                    </div>
-                    <div class="card-body">
-                        <div class="response-box">
-                            <h5>Answer:</h5>
-                            <p>{{ response }}</p>
-                        </div>
-                    </div>
-                </div>
-                {% endif %}
 
-                <!-- Process All Emails in the directory -->
-                <div class="card mt-4">
-                    <div class="card-header">
-                        <h4>Process All Emails</h4>
-                    </div>
-                    <div class="card-body">
-                        <a href="/process_all" class="btn btn-warning">Process All Emails</a>
-                    </div>
-                </div>
+def clean_email_body(body):
+    """
+    Clean email body by removing common signatures, email chains, and unnecessary phrases.
+    """
+    # 1. Remove email chains (e.g., "On [date], [sender] wrote:")
+    body = re.sub(r'(On\s.*\n?.*wrote:)', '', body)
+    body = re.sub(r'(From:.*)', '', body)
+    body = re.sub(r'(Sent:.*)', '', body)
 
-            </div>
-        </div>
-    </div>
+    # 2. Remove signature lines (e.g., "Best regards", "Thanks", etc.)
+    signature_patterns = [
+        r'Best regards,',
+        r'Thanks,',
+        r'Sent from my iPhone',
+        r'Sincerely,',
+        r'Regards,',
+        r'Cheers,'
+    ]
+    
+    for pattern in signature_patterns:
+        body = re.sub(pattern, '', body, flags=re.IGNORECASE)
 
-    <!-- Bootstrap JS and dependencies -->
-    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.3/dist/umd/popper.min.js"></script>
-    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-</body>
-</html>
+    # 3. Remove extra white spaces and newlines
+    body = re.sub(r'\n+', '\n', body).strip()
+
+    return body
+
+
+def extract_email_content(msg_file_path):
+    """Extract subject, sender, and cleaned body from .msg file"""
+    msg = Message(msg_file_path)
+    subject = msg.subject
+    sender = msg.sender
+    body = clean_email_body(msg.body)
+    return subject, sender, body
+
+
+def summarize_text(text):
+    """Summarize email content using spaCy"""
+    doc = nlp(text)
+    sentences = [sent.text for sent in doc.sents if len(sent.text.split()) > 5]
+    summary = ' '.join(sentences[:3])  # Use first 3 sentences as summary
+    return summary
+
+
+def build_knowledge_base():
+    """Read all .msg files and build the knowledge base"""
+    global knowledge_base
+    for filename in os.listdir(EMAIL_FOLDER):
+        if filename.endswith(".msg"):
+            filepath = os.path.join(EMAIL_FOLDER, filename)
+            subject, sender, body = extract_email_content(filepath)
+            summary = summarize_text(body)
+            knowledge_base.append({
+                'filename': filename,
+                'subject': subject,
+                'sender': sender,
+                'summary': summary,
+                'body': body  # Save full body for detailed responses
+            })
+
+
+def save_knowledge_base_to_json():
+    """Save the knowledge base to a JSON file"""
+    with open(KNOWLEDGE_BASE_FILE, 'w') as json_file:
+        json.dump(knowledge_base, json_file, indent=4)
+    print(f"Knowledge base saved to {KNOWLEDGE_BASE_FILE}")
+
+
+def search_knowledge_base(query):
+    """Search the knowledge base for relevant information based on the query"""
+    responses = []
+    
+    for entry in knowledge_base:
+        if any(word in entry['summary'] for word in query.split()) or any(word in entry['subject'] for word in query.split()):
+            responses.append({
+                'subject': entry['subject'],
+                'summary': entry['summary'],
+                'body': entry['body']
+            })
+    return responses
+
+
+@app.route('/')
+def index():
+    """Home page for chatbot interaction"""
+    return render_template('chat.html')
+
+
+@app.route('/query', methods=['POST'])
+def query():
+    """API endpoint to handle chatbot queries"""
+    user_query = request.form['query']
+    results = search_knowledge_base(user_query)
+    
+    if results:
+        return jsonify({
+            'status': 'success',
+            'data': results
+        })
+    else:
+        return jsonify({
+            'status': 'fail',
+            'message': 'No relevant information found in the knowledge base.'
+        })
+
+
+if __name__ == '__main__':
+    build_knowledge_base()  # Build the knowledge base when app starts
+    save_knowledge_base_to_json()  # Save to JSON file
+    app.run(debug=True)
