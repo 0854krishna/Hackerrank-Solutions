@@ -1,125 +1,74 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chatbot Interface</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 50px auto;
-            padding: 20px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            background-color: #f9f9f9;
-        }
+# main.py
 
-        #chat-box {
-            border: 1px solid #ccc;
-            padding: 10px;
-            height: 300px;
-            overflow-y: scroll;
-            margin-bottom: 10px;
-            background-color: #fff;
-            box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
-        }
+import os
+import msgparser  # Library to parse .msg files
+from flask import Flask, render_template, request
+import nltk
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from collections import Counter
 
-        #chat-box p {
-            margin: 5px 0;
-        }
+nltk.download('punkt')
+nltk.download('stopwords')
 
-        input[type="text"] {
-            width: 80%;
-            padding: 10px;
-        }
+app = Flask(__name__)
 
-        button {
-            padding: 10px;
-        }
+# Define the folder where your .msg files are stored
+EMAIL_FOLDER = "C:/Users/x01358215/krishna"
 
-        h2 {
-            text-align: center;
-        }
+# Helper function to read and parse .msg files
+def read_msg_files():
+    emails = []
+    for filename in os.listdir(EMAIL_FOLDER):
+        if filename.endswith(".msg"):
+            file_path = os.path.join(EMAIL_FOLDER, filename)
+            try:
+                msg = msgparser.parse(file_path)
+                emails.append(msg.body)  # Get email body text
+            except Exception as e:
+                print(f"Failed to read {filename}: {e}")
+    return emails
 
-        .chat-message {
-            margin: 5px 0;
-        }
+# Function to clean and preprocess text
+def preprocess_text(text):
+    # Tokenize the text
+    tokens = word_tokenize(text.lower())  # Convert text to lowercase and tokenize
+    stop_words = set(stopwords.words('english'))  # Load English stopwords
+    filtered_tokens = [token for token in tokens if token.isalnum() and token not in stop_words]
+    return filtered_tokens
 
-        .user-message {
-            color: #1a73e8;
-        }
+# Function to match query with email content
+def match_query_with_email(query, emails):
+    query_tokens = preprocess_text(query)
+    response_scores = []
 
-        .bot-message {
-            color: #4caf50;
-        }
-    </style>
-</head>
-<body>
-    <h2>Chat with the Email Bot</h2>
-    <div id="chat-box"></div>
-    <form id="chat-form">
-        <input type="text" id="query" placeholder="Ask me anything..." required>
-        <button type="submit">Send</button>
-    </form>
+    for email in emails:
+        email_tokens = preprocess_text(email)
+        common_tokens = set(query_tokens) & set(email_tokens)  # Find common words between query and email
+        score = len(common_tokens)
+        response_scores.append((score, email))  # Store score and corresponding email
 
-    <script>
-        const chatBox = document.getElementById('chat-box');
-        const chatForm = document.getElementById('chat-form');
-        const queryInput = document.getElementById('query');
+    # Sort emails based on score (higher is better)
+    response_scores.sort(reverse=True, key=lambda x: x[0])
+    
+    # Return the most relevant email or a fallback message if no match is found
+    if response_scores and response_scores[0][0] > 0:
+        return response_scores[0][1]  # Return the most relevant email text
+    else:
+        return "Sorry, I couldn't find an answer in the emails."
 
-        // When user submits the form
-        chatForm.addEventListener('submit', function(event) {
-            event.preventDefault();
-            const userQuery = queryInput.value;
+# Route to display the chatbot interface
+@app.route('/')
+def index():
+    return render_template('index.html')
 
-            // Check if query is empty
-            if (userQuery.trim() === "") {
-                return;
-            }
+# Route to handle user query and provide response
+@app.route('/ask', methods=['POST'])
+def ask():
+    user_query = request.form['query']
+    emails = read_msg_files()  # Read the emails (this can be done once, and cached for performance)
+    response = match_query_with_email(user_query, emails)
+    return render_template('index.html', query=user_query, response=response)
 
-            // Display the user's query in the chat box
-            const userMessage = document.createElement('p');
-            userMessage.classList.add('chat-message', 'user-message');
-            userMessage.textContent = "You: " + userQuery;
-            chatBox.appendChild(userMessage);
-            queryInput.value = '';
-            chatBox.scrollTop = chatBox.scrollHeight;  // Scroll to the bottom
-
-            // Send the query to Flask for processing
-            fetch('/ask', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: 'query=' + encodeURIComponent(userQuery)
-            })
-            .then(response => response.json())
-            .then(data => {
-                const botMessage = document.createElement('p');
-                botMessage.classList.add('chat-message', 'bot-message');
-
-                if (data.length > 0) {
-                    botMessage.textContent = "Bot: Here is what I found:";
-                    chatBox.appendChild(botMessage);
-
-                    // Loop through the search results and display them
-                    data.forEach(item => {
-                        const resultMessage = document.createElement('p');
-                        resultMessage.innerHTML = `<strong>Subject:</strong> ${item.subject}<br><strong>Body:</strong> ${item.body}`;
-                        chatBox.appendChild(resultMessage);
-                    });
-                } else {
-                    botMessage.textContent = "Bot: Sorry, I couldn't find anything related to that.";
-                    chatBox.appendChild(botMessage);
-                }
-
-                chatBox.scrollTop = chatBox.scrollHeight;  // Scroll to the bottom
-            })
-            .catch(error => {
-                console.error("Error:", error);
-            });
-        });
-    </script>
-</body>
-</html>
+if __name__ == "__main__":
+    app.run(debug=True)
