@@ -15,6 +15,12 @@ knowledge_base_file = 'knowledge_base.json'
 # Define your directory where `.msg` files are stored
 email_directory = 'C:/Users/YourUsername/Documents/emails'  # Replace with your actual path
 
+# Define the custom NLTK data path (where you've stored punkt and stopwords)
+nltk_data_path = 'C:/Users/x01358215/nltk_data'  # Replace with your actual NLTK data path
+
+# Set the custom NLTK data path
+nltk.data.path.append(nltk_data_path)
+
 # Load or initialize the knowledge base
 def load_knowledge_base():
     if os.path.exists(knowledge_base_file):
@@ -30,16 +36,14 @@ def save_knowledge_base(knowledge_base):
 # Initialize the knowledge base when the app starts
 knowledge_base = load_knowledge_base()
 
-# Download NLTK resources if not already available
-def download_nltk_resources():
+# Ensure the required NLTK resources are available
+def check_nltk_resources():
     try:
         nltk.data.find('tokenizers/punkt')
-    except LookupError:
-        nltk.download('punkt')  # Download punkt tokenizer if missing
-    try:
         nltk.data.find('corpora/stopwords')
     except LookupError:
-        nltk.download('stopwords')  # Download stopwords if missing
+        return False
+    return True
 
 # Function to process a .msg email file
 def process_email(msg_path):
@@ -147,5 +151,6 @@ def process_all():
     return "Processed all emails in the directory."
 
 if __name__ == '__main__':
-    download_nltk_resources()  # Ensure NLTK resources are available
+    if not check_nltk_resources():
+        return "Required NLTK resources not found. Please ensure 'punkt' and 'stopwords' are installed in the specified path.", 400
     app.run(debug=True)
