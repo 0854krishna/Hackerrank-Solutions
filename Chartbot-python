@@ -1,46 +1,66 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chatbot</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-</head>
-<body>
-    <div class="chat-container">
-        <div class="chat-box">
-            <div id="chat-output" class="chat-output"></div>
-            <input type="text" id="user-input" placeholder="Type your message..." class="chat-input">
-            <button id="send-btn" class="send-btn">Send</button>
-        </div>
-    </div>
-    
-    <script>
-        $(document).ready(function() {
-            $('#send-btn').click(function() {
-                var userQuery = $('#user-input').val();
-                $('#chat-output').append('<div class="user-message">' + userQuery + '</div>');
-                $('#user-input').val('');
-                
-                $.post('/query', { query: userQuery }, function(response) {
-                    if (response.status === 'success') {
-                        response.data.forEach(function(item) {
-                            $('#chat-output').append('<div class="bot-message"><strong>' + item.subject + ':</strong> ' + item.summary + '</div>');
-                        });
-                    } else {
-                        $('#chat-output').append('<div class="bot-message">' + response.message + '</div>');
-                    }
-                    $('#chat-output').scrollTop($('#chat-output')[0].scrollHeight);
-                });
-            });
+body {
+    font-family: Arial, sans-serif;
+    background-color: #f7f7f7;
+    margin: 0;
+    padding: 0;
+}
 
-            $('#user-input').keypress(function(e) {
-                if (e.which === 13) {
-                    $('#send-btn').click();
-                }
-            });
-        });
-    </script>
-</body>
-</html>
+.chat-container {
+    width: 400px;
+    margin: 50px auto;
+    border: 1px solid #ccc;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    background-color: white;
+}
+
+.chat-box {
+    display: flex;
+    flex-direction: column;
+    height: 500px;
+}
+
+.chat-output {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+    border-bottom: 1px solid #ccc;
+}
+
+.chat-input {
+    padding: 10px;
+    border: none;
+    border-top: 1px solid #ccc;
+    border-radius: 0;
+    width: calc(100% - 80px);
+}
+
+.send-btn {
+    padding: 10px;
+    border: none;
+    background-color: #007bff;
+    color: white;
+    cursor: pointer;
+    border-radius: 0;
+}
+
+.send-btn:hover {
+    background-color: #0056b3;
+}
+
+.user-message {
+    margin: 5px 0;
+    padding: 10px;
+    background-color: #007bff;
+    color: white;
+    border-radius: 5px;
+    align-self: flex-end;
+}
+
+.bot-message {
+    margin: 5px 0;
+    padding: 10px;
+    background-color: #e0e0e0;
+    border-radius: 5px;
+    align-self: flex-start;
+}
