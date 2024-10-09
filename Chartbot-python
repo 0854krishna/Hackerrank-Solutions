@@ -1,1 +1,90 @@
-Text
+from flask import Flask, render_template, request, jsonify
+from fuzzywuzzy import fuzz
+import os
+import json
+import extract_msg
+import re
+import spacy
+from threading import Thread
+
+# Load SpaCy model
+nlp = spacy.load("en_core_web_sm")
+
+# Flask app setup
+app = Flask(__name__)
+
+# Knowledge base file
+KNOWLEDGE_BASE_FILE = "knowledge_base.json"
+
+# Ensure the knowledge base exists
+if not os.path.exists(KNOWLEDGE_BASE_FILE):
+    with open(KNOWLEDGE_BASE_FILE, 'w') as f:
+        json.dump([], f)
+
+# Parse .msg files
+def read_msg(file_path):
+    msg = extract_msg.Message(file_path)
+    return {
+        'sender': msg.sender,
+        'subject': msg.subject,
+        'date': msg.date,
+        'body': msg.body
+    }
+
+# Clean email content
+def clean_email_body(body):
+    body = re.sub(r'(?i)Best regards.*|Sincerely.*|Kind regards.*', '', body)
+    body = re.sub(r'--\s*', '', body)
+    body = re.sub(r'(?i)This email and any.*confidentiality.*disclaimer.*', '', body)
+    return body.strip()
+
+# Store extracted knowledge in a JSON file
+def store_knowledge(subject, sender, body, entities, file_path=KNOWLEDGE_BASE_FILE):
+    knowledge_entry = {
+        "subject": subject,
+        "sender": sender,
+        "body": body,
+        "entities": entities
+    }
+    with open(file_path, 'r') as f:
+        knowledge_base = json.load(f)
+    
+    knowledge_base.append(knowledge_entry)
+
+    with open(file_path, 'w') as f:
+        json.dump(knowledge_base, f, indent=4)
+
+# Search the knowledge base using fuzzy matching
+def search_knowledge_base(query):
+    with open(KNOWLEDGE_BASE_FILE, 'r') as f:
+        knowledge_base = json.load(f)
+    
+    results = []
+    for entry in knowledge_base:
+        score = fuzz.ratio(query.lower(), entry['subject'].lower())
+        if score > 70:
+            results.append({
+                "subject": entry['subject'],
+                "body": entry['body']
+            })
+    
+    return results
+
+# Flask routes
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+@app.route("/ask", methods=["POST"])
+def ask():
+    user_query = request.form['query']
+    results = search_knowledge_base(user_query)
+    return jsonify(results)
+
+# Run Flask app in a separate thread so it doesn't block the notebook
+def run_flask():
+    app.run(debug=True, use_reloader=False)
+
+# Start the Flask app in a separate thread
+flask_thread = Thread(target=run_flask)
+flask_thread.start()
