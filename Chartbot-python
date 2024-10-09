@@ -1,130 +1,46 @@
-import os
-import re
-import json
-import spacy
-from flask import Flask, render_template, request, jsonify
-from extract_msg import Message  # For reading .msg files
-
-# Load the spaCy model (assumed to be installed and available)
-nlp = spacy.load("en_core_web_md")
-
-# Create a Flask app
-app = Flask(__name__)
-
-# Path to folder containing .msg files
-EMAIL_FOLDER = 'path_to_msg_folder'
-KNOWLEDGE_BASE_FILE = 'knowledge.json'
-
-# Global variable to store knowledge base (summarized emails)
-knowledge_base = []
-
-def clean_email_body(body):
-    """
-    Clean email body by removing common signatures, email chains,
-    and unnecessary phrases.
-    """
-    # 1. Normalize line endings
-    body = body.replace('\r\n', '\n').replace('\r', '\n')
-
-    # 2. Remove email chains (e.g., "On [date], [sender] wrote:")
-    body = re.sub(r'(On\s.*\n?.*wrote:)', '', body)
-    body = re.sub(r'(From:.*\n)', '', body)
-    body = re.sub(r'(Sent:.*\n)', '', body)
-    body = re.sub(r'(To:.*\n)', '', body)
-    body = re.sub(r'(Cc:.*\n)', '', body)
-    body = re.sub(r'(Bcc:.*\n)', '', body)
-
-    # 3. Remove signature lines (e.g., "Best regards", "Thanks", etc.)
-    signature_patterns = [
-        r'Best regards,',
-        r'Thanks,',
-        r'Sent from my iPhone',
-        r'Sincerely,',
-        r'Regards,',
-        r'Cheers,'
-    ]
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-box">
+            <div id="chat-output" class="chat-output"></div>
+            <input type="text" id="user-input" placeholder="Type your message..." class="chat-input">
+            <button id="send-btn" class="send-btn">Send</button>
+        </div>
+    </div>
     
-    for pattern in signature_patterns:
-        body = re.sub(pattern, '', body, flags=re.IGNORECASE)
+    <script>
+        $(document).ready(function() {
+            $('#send-btn').click(function() {
+                var userQuery = $('#user-input').val();
+                $('#chat-output').append('<div class="user-message">' + userQuery + '</div>');
+                $('#user-input').val('');
+                
+                $.post('/query', { query: userQuery }, function(response) {
+                    if (response.status === 'success') {
+                        response.data.forEach(function(item) {
+                            $('#chat-output').append('<div class="bot-message"><strong>' + item.subject + ':</strong> ' + item.summary + '</div>');
+                        });
+                    } else {
+                        $('#chat-output').append('<div class="bot-message">' + response.message + '</div>');
+                    }
+                    $('#chat-output').scrollTop($('#chat-output')[0].scrollHeight);
+                });
+            });
 
-    # 4. Remove extra white spaces and newlines
-    body = re.sub(r'\n+', '\n', body).strip()
-
-    return body
-
-def extract_email_content(msg_file_path):
-    """Extract subject, sender, and cleaned body from .msg file"""
-    msg = Message(msg_file_path)
-    subject = msg.subject
-    sender = msg.sender
-    body = clean_email_body(msg.body)
-    return subject, sender, body
-
-def summarize_text(text):
-    """Summarize email content using spaCy"""
-    doc = nlp(text)
-    sentences = [sent.text for sent in doc.sents if len(sent.text.split()) > 5]
-    summary = ' '.join(sentences[:3])  # Use first 3 sentences as summary
-    return summary
-
-def build_knowledge_base():
-    """Read all .msg files and build the knowledge base"""
-    global knowledge_base
-    for filename in os.listdir(EMAIL_FOLDER):
-        if filename.endswith(".msg"):
-            filepath = os.path.join(EMAIL_FOLDER, filename)
-            subject, sender, body = extract_email_content(filepath)
-            summary = summarize_text(body)
-            knowledge_base.append({
-                'filename': filename,
-                'subject': subject,
-                'sender': sender,
-                'summary': summary,
-                'body': body  # Save full body for detailed responses
-            })
-
-def save_knowledge_base_to_json():
-    """Save the knowledge base to a JSON file"""
-    with open(KNOWLEDGE_BASE_FILE, 'w') as json_file:
-        json.dump(knowledge_base, json_file, indent=4)
-    print(f"Knowledge base saved to {KNOWLEDGE_BASE_FILE}")
-
-def search_knowledge_base(query):
-    """Search the knowledge base for relevant information based on the query"""
-    responses = []
-    
-    for entry in knowledge_base:
-        if any(word in entry['summary'] for word in query.split()) or any(word in entry['subject'] for word in query.split()):
-            responses.append({
-                'subject': entry['subject'],
-                'summary': entry['summary'],
-                'body': entry['body']
-            })
-    return responses
-
-@app.route('/')
-def index():
-    """Home page for chatbot interaction"""
-    return render_template('chat.html')
-
-@app.route('/query', methods=['POST'])
-def query():
-    """API endpoint to handle chatbot queries"""
-    user_query = request.form['query']
-    results = search_knowledge_base(user_query)
-    
-    if results:
-        return jsonify({
-            'status': 'success',
-            'data': results
-        })
-    else:
-        return jsonify({
-            'status': 'fail',
-            'message': 'No relevant information found in the knowledge base.'
-        })
-
-if __name__ == '__main__':
-    build_knowledge_base()  # Build the knowledge base when app starts
-    save_knowledge_base_to_json()  # Save to JSON file
-    app.run(debug=True)
+            $('#user-input').keypress(function(e) {
+                if (e.which === 13) {
+                    $('#send-btn').click();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
