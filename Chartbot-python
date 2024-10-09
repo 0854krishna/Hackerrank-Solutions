@@ -1,109 +1,125 @@
-import os
-import extract_msg
-import json
-from flask import Flask, render_template, request, jsonify
-from fuzzywuzzy import fuzz
-import spacy
-from threading import Thread
-import re
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot Interface</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
 
-# Load SpaCy model for entity recognition (if required)
-nlp = spacy.load("en_core_web_sm")
+        #chat-box {
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 300px;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+            background-color: #fff;
+            box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+        }
 
-# Flask app setup
-app = Flask(__name__)
+        #chat-box p {
+            margin: 5px 0;
+        }
 
-# Knowledge base file path
-KNOWLEDGE_BASE_FILE = "knowledge_base.json"
+        input[type="text"] {
+            width: 80%;
+            padding: 10px;
+        }
 
-# Path to the directory where .msg files are stored
-MSG_DIRECTORY = "C:/users/x01358215/krishna"  # Update this with your actual directory path
+        button {
+            padding: 10px;
+        }
 
-# Ensure the knowledge base exists
-if not os.path.exists(KNOWLEDGE_BASE_FILE):
-    with open(KNOWLEDGE_BASE_FILE, 'w') as f:
-        json.dump([], f)
+        h2 {
+            text-align: center;
+        }
 
-# Function to read and extract data from a .msg file
-def read_msg(file_path):
-    msg = extract_msg.Message(file_path)
-    return {
-        'sender': msg.sender,
-        'subject': msg.subject,
-        'date': msg.date,
-        'body': msg.body
-    }
+        .chat-message {
+            margin: 5px 0;
+        }
 
-# Function to clean email content (remove signatures, disclaimers, etc.)
-def clean_email_body(body):
-    body = re.sub(r'(?i)Best regards.*|Sincerely.*|Kind regards.*', '', body)
-    body = re.sub(r'--\s*', '', body)
-    body = re.sub(r'(?i)This email and any.*confidentiality.*disclaimer.*', '', body)
-    return body.strip()
+        .user-message {
+            color: #1a73e8;
+        }
 
-# Function to store extracted email data in the knowledge base (JSON)
-def store_knowledge(subject, sender, body, entities, file_path=KNOWLEDGE_BASE_FILE):
-    knowledge_entry = {
-        "subject": subject,
-        "sender": sender,
-        "body": body,
-        "entities": entities
-    }
-    with open(file_path, 'r') as f:
-        knowledge_base = json.load(f)
-    
-    knowledge_base.append(knowledge_entry)
+        .bot-message {
+            color: #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <h2>Chat with the Email Bot</h2>
+    <div id="chat-box"></div>
+    <form id="chat-form">
+        <input type="text" id="query" placeholder="Ask me anything..." required>
+        <button type="submit">Send</button>
+    </form>
 
-    with open(file_path, 'w') as f:
-        json.dump(knowledge_base, f, indent=4)
+    <script>
+        const chatBox = document.getElementById('chat-box');
+        const chatForm = document.getElementById('chat-form');
+        const queryInput = document.getElementById('query');
 
-# Function to process all .msg files in the given directory
-def process_msg_files():
-    for filename in os.listdir(MSG_DIRECTORY):
-        if filename.endswith(".msg"):
-            file_path = os.path.join(MSG_DIRECTORY, filename)
-            print(f"Processing {filename}...")
-            # Read the email from the .msg file
-            email_data = read_msg(file_path)
-            # Clean the email body
-            cleaned_body = clean_email_body(email_data['body'])
-            # Store the knowledge (subject, sender, cleaned body) in the knowledge base
-            store_knowledge(email_data['subject'], email_data['sender'], cleaned_body, [])
+        // When user submits the form
+        chatForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const userQuery = queryInput.value;
 
-# Call process_msg_files to load knowledge when the app starts
-process_msg_files()
+            // Check if query is empty
+            if (userQuery.trim() === "") {
+                return;
+            }
 
-# Function to search the knowledge base using fuzzy matching
-def search_knowledge_base(query):
-    with open(KNOWLEDGE_BASE_FILE, 'r') as f:
-        knowledge_base = json.load(f)
-    
-    results = []
-    for entry in knowledge_base:
-        score = fuzz.ratio(query.lower(), entry['subject'].lower())
-        if score > 70:
-            results.append({
-                "subject": entry['subject'],
-                "body": entry['body']
+            // Display the user's query in the chat box
+            const userMessage = document.createElement('p');
+            userMessage.classList.add('chat-message', 'user-message');
+            userMessage.textContent = "You: " + userQuery;
+            chatBox.appendChild(userMessage);
+            queryInput.value = '';
+            chatBox.scrollTop = chatBox.scrollHeight;  // Scroll to the bottom
+
+            // Send the query to Flask for processing
+            fetch('/ask', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'query=' + encodeURIComponent(userQuery)
             })
-    
-    return results
+            .then(response => response.json())
+            .then(data => {
+                const botMessage = document.createElement('p');
+                botMessage.classList.add('chat-message', 'bot-message');
 
-# Flask routes
-@app.route("/")
-def index():
-    return render_template("index.html")
+                if (data.length > 0) {
+                    botMessage.textContent = "Bot: Here is what I found:";
+                    chatBox.appendChild(botMessage);
 
-@app.route("/ask", methods=["POST"])
-def ask():
-    user_query = request.form['query']
-    results = search_knowledge_base(user_query)
-    return jsonify(results)
+                    // Loop through the search results and display them
+                    data.forEach(item => {
+                        const resultMessage = document.createElement('p');
+                        resultMessage.innerHTML = `<strong>Subject:</strong> ${item.subject}<br><strong>Body:</strong> ${item.body}`;
+                        chatBox.appendChild(resultMessage);
+                    });
+                } else {
+                    botMessage.textContent = "Bot: Sorry, I couldn't find anything related to that.";
+                    chatBox.appendChild(botMessage);
+                }
 
-# Run Flask app in a separate thread so it doesn't block the notebook
-def run_flask():
-    app.run(debug=True, use_reloader=False)
-
-# Start the Flask app in a separate thread
-flask_thread = Thread(target=run_flask)
-flask_thread.start()
+                chatBox.scrollTop = chatBox.scrollHeight;  // Scroll to the bottom
+            })
+            .catch(error => {
+                console.error("Error:", error);
+            });
+        });
+    </script>
+</body>
+</html>
