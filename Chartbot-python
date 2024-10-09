@@ -12,6 +12,9 @@ app = Flask(__name__)
 # Define the path to the knowledge base file
 knowledge_base_file = 'knowledge_base.json'
 
+# Define your directory where `.msg` files are stored
+email_directory = 'C:/Users/YourUsername/Documents/emails'  # Replace with your actual path
+
 # Load or initialize the knowledge base
 def load_knowledge_base():
     if os.path.exists(knowledge_base_file):
@@ -92,12 +95,19 @@ def query_knowledge_base(query):
     else:
         return ["Sorry, I couldn't find any relevant information in the emails."]
 
+# Automatically process all .msg files in the specified directory
+def process_all_emails():
+    for filename in os.listdir(email_directory):
+        if filename.endswith(".msg"):
+            email_path = os.path.join(email_directory, filename)
+            process_email(email_path)
+
 # Route for the home page
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Route to handle file upload
+# Route to handle file upload (for manual email upload)
 @app.route('/process', methods=['POST'])
 def process():
     if 'email' not in request.files:
@@ -129,6 +139,12 @@ def query():
     response = query_knowledge_base(query_text)
 
     return render_template('index.html', response=response, query=query_text)
+
+# Route to automatically process all emails in the directory
+@app.route('/process_all', methods=['GET'])
+def process_all():
+    process_all_emails()
+    return "Processed all emails in the directory."
 
 if __name__ == '__main__':
     download_nltk_resources()  # Ensure NLTK resources are available
