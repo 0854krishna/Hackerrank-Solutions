@@ -1,74 +1,135 @@
-# main.py
-
 import os
-import msgparser  # Library to parse .msg files
+import json
 from flask import Flask, render_template, request
 import nltk
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
-from collections import Counter
+import extract_msg
 
-nltk.download('punkt')
-nltk.download('stopwords')
-
+# Initialize the Flask app
 app = Flask(__name__)
 
-# Define the folder where your .msg files are stored
-EMAIL_FOLDER = "C:/Users/x01358215/krishna"
+# Define the path to the knowledge base file
+knowledge_base_file = 'knowledge_base.json'
 
-# Helper function to read and parse .msg files
-def read_msg_files():
-    emails = []
-    for filename in os.listdir(EMAIL_FOLDER):
-        if filename.endswith(".msg"):
-            file_path = os.path.join(EMAIL_FOLDER, filename)
-            try:
-                msg = msgparser.parse(file_path)
-                emails.append(msg.body)  # Get email body text
-            except Exception as e:
-                print(f"Failed to read {filename}: {e}")
-    return emails
+# Load or initialize the knowledge base
+def load_knowledge_base():
+    if os.path.exists(knowledge_base_file):
+        with open(knowledge_base_file, 'r') as file:
+            return json.load(file)
+    return []  # Return an empty list if no knowledge base exists
 
-# Function to clean and preprocess text
+# Save knowledge base to a JSON file
+def save_knowledge_base(knowledge_base):
+    with open(knowledge_base_file, 'w') as file:
+        json.dump(knowledge_base, file, indent=4)
+
+# Initialize the knowledge base when the app starts
+knowledge_base = load_knowledge_base()
+
+# Download NLTK resources if not already available
+def download_nltk_resources():
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')  # Download punkt tokenizer if missing
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        nltk.download('stopwords')  # Download stopwords if missing
+
+# Function to process a .msg email file
+def process_email(msg_path):
+    # Extracting email content using extract-msg
+    msg = extract_msg.Message(msg_path)
+    msg_message = msg.body  # Extract email body
+
+    # Preprocess the text (tokenization and stopword removal)
+    tokens = preprocess_text(msg_message)
+
+    # Add to knowledge base and save to file
+    add_to_knowledge_base(tokens)
+    save_knowledge_base(knowledge_base)
+
+    return tokens
+
+# Preprocess the text (tokenization and stopword removal)
 def preprocess_text(text):
-    # Tokenize the text
-    tokens = word_tokenize(text.lower())  # Convert text to lowercase and tokenize
-    stop_words = set(stopwords.words('english'))  # Load English stopwords
+    # Tokenize the text using NLTK's Punkt tokenizer
+    tokens = word_tokenize(text.lower())  # Tokenize and make the text lowercase
+    
+    # Load English stopwords
+    stop_words = set(stopwords.words('english'))
+
+    # Filter tokens: keep only those that are alphanumeric and not stopwords
     filtered_tokens = [token for token in tokens if token.isalnum() and token not in stop_words]
+    
     return filtered_tokens
 
-# Function to match query with email content
-def match_query_with_email(query, emails):
-    query_tokens = preprocess_text(query)
-    response_scores = []
+# Add processed tokens to the knowledge base (as a list of important tokens/phrases)
+def add_to_knowledge_base(tokens):
+    # Convert tokens to a string and append it to the knowledge base
+    text = " ".join(tokens)
+    knowledge_base.append(text)
 
-    for email in emails:
-        email_tokens = preprocess_text(email)
-        common_tokens = set(query_tokens) & set(email_tokens)  # Find common words between query and email
-        score = len(common_tokens)
-        response_scores.append((score, email))  # Store score and corresponding email
-
-    # Sort emails based on score (higher is better)
-    response_scores.sort(reverse=True, key=lambda x: x[0])
+# Basic query answering: Search for keywords in the knowledge base
+def query_knowledge_base(query):
+    query_tokens = word_tokenize(query.lower())
     
-    # Return the most relevant email or a fallback message if no match is found
-    if response_scores and response_scores[0][0] > 0:
-        return response_scores[0][1]  # Return the most relevant email text
+    # Filter query tokens to remove stopwords
+    stop_words = set(stopwords.words('english'))
+    query_tokens = [token for token in query_tokens if token.isalnum() and token not in stop_words]
+    
+    # Search for the query tokens in the knowledge base
+    responses = []
+    for kb_text in knowledge_base:
+        match = [word for word in query_tokens if word in kb_text]
+        if match:
+            responses.append(kb_text)  # Add the matched text from the knowledge base
+    
+    if responses:
+        return responses
     else:
-        return "Sorry, I couldn't find an answer in the emails."
+        return ["Sorry, I couldn't find any relevant information in the emails."]
 
-# Route to display the chatbot interface
+# Route for the home page
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Route to handle user query and provide response
-@app.route('/ask', methods=['POST'])
-def ask():
-    user_query = request.form['query']
-    emails = read_msg_files()  # Read the emails (this can be done once, and cached for performance)
-    response = match_query_with_email(user_query, emails)
-    return render_template('index.html', query=user_query, response=response)
+# Route to handle file upload
+@app.route('/process', methods=['POST'])
+def process():
+    if 'email' not in request.files:
+        return "No file part", 400
 
-if __name__ == "__main__":
+    file = request.files['email']
+
+    if file.filename == '':
+        return "No selected file", 400
+
+    if file and file.filename.endswith('.msg'):
+        # Save the uploaded file temporarily
+        filepath = os.path.join('uploads', file.filename)
+        file.save(filepath)
+        
+        # Process the email and add it to the knowledge base
+        tokens = process_email(filepath)
+
+        return render_template('index.html', tokens=tokens)
+
+    return "Invalid file format. Please upload a .msg file.", 400
+
+# Route to handle user query
+@app.route('/query', methods=['POST'])
+def query():
+    query_text = request.form.get('query')
+    
+    # Perform a query against the knowledge base
+    response = query_knowledge_base(query_text)
+
+    return render_template('index.html', response=response, query=query_text)
+
+if __name__ == '__main__':
+    download_nltk_resources()  # Ensure NLTK resources are available
     app.run(debug=True)
