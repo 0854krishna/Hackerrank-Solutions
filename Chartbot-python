@@ -1,27 +1,30 @@
+import os
+import extract_msg
+import json
 from flask import Flask, render_template, request, jsonify
 from fuzzywuzzy import fuzz
-import os
-import json
-import extract_msg
-import re
 import spacy
 from threading import Thread
+import re
 
-# Load SpaCy model
+# Load SpaCy model for entity recognition (if required)
 nlp = spacy.load("en_core_web_sm")
 
 # Flask app setup
 app = Flask(__name__)
 
-# Knowledge base file
+# Knowledge base file path
 KNOWLEDGE_BASE_FILE = "knowledge_base.json"
+
+# Path to the directory where .msg files are stored
+MSG_DIRECTORY = "C:/users/x01358215/krishna"  # Update this with your actual directory path
 
 # Ensure the knowledge base exists
 if not os.path.exists(KNOWLEDGE_BASE_FILE):
     with open(KNOWLEDGE_BASE_FILE, 'w') as f:
         json.dump([], f)
 
-# Parse .msg files
+# Function to read and extract data from a .msg file
 def read_msg(file_path):
     msg = extract_msg.Message(file_path)
     return {
@@ -31,14 +34,14 @@ def read_msg(file_path):
         'body': msg.body
     }
 
-# Clean email content
+# Function to clean email content (remove signatures, disclaimers, etc.)
 def clean_email_body(body):
     body = re.sub(r'(?i)Best regards.*|Sincerely.*|Kind regards.*', '', body)
     body = re.sub(r'--\s*', '', body)
     body = re.sub(r'(?i)This email and any.*confidentiality.*disclaimer.*', '', body)
     return body.strip()
 
-# Store extracted knowledge in a JSON file
+# Function to store extracted email data in the knowledge base (JSON)
 def store_knowledge(subject, sender, body, entities, file_path=KNOWLEDGE_BASE_FILE):
     knowledge_entry = {
         "subject": subject,
@@ -54,7 +57,23 @@ def store_knowledge(subject, sender, body, entities, file_path=KNOWLEDGE_BASE_FI
     with open(file_path, 'w') as f:
         json.dump(knowledge_base, f, indent=4)
 
-# Search the knowledge base using fuzzy matching
+# Function to process all .msg files in the given directory
+def process_msg_files():
+    for filename in os.listdir(MSG_DIRECTORY):
+        if filename.endswith(".msg"):
+            file_path = os.path.join(MSG_DIRECTORY, filename)
+            print(f"Processing {filename}...")
+            # Read the email from the .msg file
+            email_data = read_msg(file_path)
+            # Clean the email body
+            cleaned_body = clean_email_body(email_data['body'])
+            # Store the knowledge (subject, sender, cleaned body) in the knowledge base
+            store_knowledge(email_data['subject'], email_data['sender'], cleaned_body, [])
+
+# Call process_msg_files to load knowledge when the app starts
+process_msg_files()
+
+# Function to search the knowledge base using fuzzy matching
 def search_knowledge_base(query):
     with open(KNOWLEDGE_BASE_FILE, 'r') as f:
         knowledge_base = json.load(f)
