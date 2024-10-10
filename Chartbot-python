@@ -2,6 +2,7 @@ import os
 import re
 import json
 import spacy
+import requests  # Import requests for making HTTP calls
 from flask import Flask, render_template, request, jsonify
 from extract_msg import Message  # For reading .msg files
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -19,34 +20,6 @@ KNOWLEDGE_BASE_FILE = 'knowledge.json'
 
 # Global variable to store knowledge base (summarized emails)
 knowledge_base = []
-
-def modify_img_src(html_string):
-    # Regular expression to match <img> tags with a src attribute, regardless of order
-    pattern = r'(<img\b[^>]*?\s+src=["\'])(?!https://confluence/)([^"\']*)(["\'][^>]*?>)'
-
-    def replace_src(match):
-        # Get the original src value
-        original_src = match.group(2)
-        full_url = f'https://confluence/{original_src}'
-
-        # Download the image and save it locally
-        image_response = requests.get(full_url)
-        if image_response.status_code == 200:
-            # Create a local file path
-            image_filename = os.path.join(IMAGE_DIR, os.path.basename(original_src))
-            with open(image_filename, 'wb') as img_file:
-                img_file.write(image_response.content)
-            
-            # Return the modified HTML with the local image path
-            return f'{match.group(1)}{image_filename}{match.group(3)}'
-        else:
-            # If the download fails, return the original match
-            return match.group(0)
-
-    # Replace the src with the modified version
-    modified_html = re.sub(pattern, replace_src, html_string)
-
-    return modified_html
 
 def clean_email_body(body):
     """Clean email body by removing common signatures, email chains, and unnecessary phrases."""
@@ -73,6 +46,7 @@ def clean_email_body(body):
 
     # Remove "RESTRICTED - INTERNAL" and similar classifications
     body = re.sub(r'RESTRICTED\s+-\s+INTERNAL', '', body, flags=re.IGNORECASE)
+    body = re.sub(r'Caution:\s?.*', '', body, flags=re.IGNORECASE)  # Remove Caution statements
 
     # Remove extra white spaces and newlines
     body = re.sub(r'\n+', '\n', body).strip()
@@ -80,32 +54,44 @@ def clean_email_body(body):
     return body
 
 def extract_email_content(msg_file_path):
-    """Extract subject, sender, cleaned body, and time from .msg file."""
+    """Extract subject, sender, receiver, cleaned body, and time from .msg file."""
     msg = Message(msg_file_path)
     subject = msg.subject
     sender = msg.sender
+    receivers = msg.to  # Extract the receiver(s)
     body = clean_email_body(msg.body)
     email_time = msg.date.strftime("%Y-%m-%d %H:%M:%S") if msg.date else "Unknown"
-    return subject, sender, body, email_time
+    return subject, sender, receivers, body, email_time
+
+def clean_summary_text(text):
+    """Clean summary text to remove unwanted phrases."""
+    # Remove unwanted phrases
+    text = re.sub(r'Subject:\s?.*', '', text)
+    text = re.sub(r'RESTRICTED\s+-\s+INTERNAL', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'Caution:\s?.*', '', text, flags=re.IGNORECASE)
+    return text.strip()
 
 def summarize_text_spacy(text):
     """Summarize email content using spaCy."""
-    doc = nlp(text)
+    cleaned_text = clean_summary_text(text)  # Clean the text
+    doc = nlp(cleaned_text)
     sentences = [sent.text for sent in doc.sents if len(sent.text.split()) > 5]
     return ' '.join(sentences[:3])  # Use first 3 sentences as summary
 
 def summarize_with_keywords(text):
     """Extract keywords as a form of summarization."""
-    doc = nlp(text)
+    cleaned_text = clean_summary_text(text)  # Clean the text
+    doc = nlp(cleaned_text)
     keywords = [token.text for token in doc if token.is_keyword or token.is_stop]
     return ' '.join(set(keywords))
 
 def summarize_with_pos_weighting(text):
     """Summarize text with POS weighting."""
-    doc = nlp(text)
+    cleaned_text = clean_summary_text(text)  # Clean the text
+    doc = nlp(cleaned_text)
     sentences = [sent.text for sent in doc.sents if len(sent.text.split()) > 5]
     
-    # Weight sentences based on the number of nouns and verbs (as a simple example)
+    # Weight sentences based on the number of nouns and verbs
     sentence_scores = []
     for sentence in sentences:
         score = sum(1 for token in nlp(sentence) if token.pos_ in ['NOUN', 'VERB'])
@@ -117,28 +103,33 @@ def summarize_with_pos_weighting(text):
 
 def summarize_with_dependency_parsing(text):
     """Summarize text using dependency parsing."""
-    doc = nlp(text)
+    cleaned_text = clean_summary_text(text)  # Clean the text
+    doc = nlp(cleaned_text)
     # Extract the root of the sentence to create a summary
     root_sentences = [sent.root.text for sent in doc.sents if sent.root]
     return ' '.join(root_sentences)
 
 def summarize_with_entities(text):
     """Summarize text using named entity recognition."""
-    doc = nlp(text)
+    cleaned_text = clean_summary_text(text)  # Clean the text
+    doc = nlp(cleaned_text)
     entities = [ent.text for ent in doc.ents]
     return ' '.join(set(entities))
 
 def build_knowledge_base():
     """Read all .msg files and build the knowledge base."""
     global knowledge_base
+    id_counter = 1  # Initialize ID counter
     for filename in os.listdir(EMAIL_FOLDER):
         if filename.endswith(".msg"):
             filepath = os.path.join(EMAIL_FOLDER, filename)
-            subject, sender, body, time = extract_email_content(filepath)
+            subject, sender, receivers, body, time = extract_email_content(filepath)
             knowledge_base.append({
+                'id': id_counter,  # Add ID to the entry
                 'filename': filename,
                 'subject': subject,
                 'sender': sender,
+                'receivers': receivers,  # Store receivers information
                 'time': time,
                 'summary_spacy': summarize_text_spacy(body),
                 'summary_keywords': summarize_with_keywords(body),
@@ -147,12 +138,21 @@ def build_knowledge_base():
                 'summary_entities': summarize_with_entities(body),
                 'body': body  # Save full body for detailed responses
             })
+            id_counter += 1  # Increment the ID counter
 
 def save_knowledge_base_to_json():
     """Save the knowledge base to a JSON file."""
     with open(KNOWLEDGE_BASE_FILE, 'w') as json_file:
         json.dump(knowledge_base, json_file, indent=4)
     print(f"Knowledge base saved to {KNOWLEDGE_BASE_FILE}")
+
+def post_knowledge_base(url):
+    """Post the knowledge base to a specified URL."""
+    response = requests.post(url, json=knowledge_base)
+    if response.status_code == 200:
+        print("Successfully posted knowledge base.")
+    else:
+        print(f"Failed to post knowledge base. Status code: {response.status_code}")
 
 def search_knowledge_base(query):
     """Search the knowledge base for relevant information based on the query using TF-IDF."""
@@ -170,6 +170,7 @@ def search_knowledge_base(query):
     for idx in relevant_indices:
         if cosine_similarities[idx] > 0:  # Only consider non-zero similarity scores
             responses.append({
+                'id': knowledge_base[idx]['id'],  # Include ID in the response
                 'subject': knowledge_base[idx]['subject'],
                 'summary_spacy': knowledge_base[idx]['summary_spacy'],
                 'summary_keywords': knowledge_base[idx]['summary_keywords'],
@@ -177,6 +178,7 @@ def search_knowledge_base(query):
                 'summary_dependency': knowledge_base[idx]['summary_dependency'],
                 'summary_entities': knowledge_base[idx]['summary_entities'],
                 'body': knowledge_base[idx]['body'],
+                'receivers': knowledge_base[idx]['receivers'],  # Include receivers information
                 'time': knowledge_base[idx]['time']  # Include the email time
             })
 
@@ -204,7 +206,4 @@ def query():
             'message': 'No relevant information found in the knowledge base.'
         })
 
-if __name__ == '__main__':
-    build_knowledge_base()  # Build the knowledge base when app starts
-    save_knowledge_base_to_json()  # Save to JSON file
-    app.run(debug=True)
+if __name__ == '__
