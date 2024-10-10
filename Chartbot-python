@@ -2,12 +2,13 @@ import os
 import re
 import json
 import spacy
+import pytz
 from flask import Flask, render_template, request, jsonify
-from extract_msg import Message  # For reading .msg files
+from extract_msg import Message
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from datetime import datetime
-import pytz  # To handle timezone conversion
+from email.utils import parsedate_to_datetime
 
 # Load the spaCy model (assumed to be installed and available)
 nlp = spacy.load("en_core_web_md")
@@ -16,173 +17,145 @@ nlp = spacy.load("en_core_web_md")
 app = Flask(__name__)
 
 # Path to folder containing .msg files
-EMAIL_FOLDER = 'c:/Users/x01358215/SampleEmails'  # Replace with your folder path
-KNOWLEDGE_BASE_FILE = 'knowledge.json'
+EMAIL_FOLDER = 'c:/Users/x01358215/SampleEmails'
+KNOWLEDGE_BASE_FILE = 'knowledge_base.json'
 
 # Global variable to store knowledge base (summarized emails)
 knowledge_base = []
 
+# Timezone to convert to (example: 'Asia/Kolkata')
+LOCAL_TIMEZONE = 'Asia/Kolkata'
+
+def convert_to_local_datetime(date_str):
+    """
+    Convert a string date (in RFC 2822 format) to local datetime.
+    """
+    try:
+        # Parse the date string into a datetime object
+        date_obj = parsedate_to_datetime(date_str)
+        # Convert to local timezone
+        local_tz = pytz.timezone(LOCAL_TIMEZONE)
+        if date_obj.tzinfo is None:
+            date_obj = pytz.utc.localize(date_obj)  # Assume UTC if no timezone info
+        local_datetime = date_obj.astimezone(local_tz)
+        return local_datetime.strftime('%Y-%m-%d %H:%M:%S %Z')  # Convert to a readable string format
+    except Exception as e:
+        print(f"Error converting date: {e}")
+        return "Unknown"
+
 def clean_email_body(body):
-    """Clean email body by removing common signatures, email chains, and unnecessary phrases."""
-    # 1. Normalize line endings
+    """Clean email body by removing signatures, email chains, etc."""
     body = body.replace('\r\n', '\n').replace('\r', '\n')
-
-    # 2. Remove email chains (e.g., "On [date], [sender] wrote:")
     body = re.sub(r'(On\s.*\n?.*wrote:)', '', body)
-    body = re.sub(r'(From:.*\n)', '', body)
-    body = re.sub(r'(Sent:.*\n)', '', body)
-    body = re.sub(r'(To:.*\n)', '', body)
-    body = re.sub(r'(Cc:.*\n)', '', body)
-    body = re.sub(r'(Bcc:.*\n)', '', body)
+    body = re.sub(r'(From:.*\n|To:.*\n|Cc:.*\n|Bcc:.*\n|Sent:.*\n)', '', body)
+    body = re.sub(r'(Best regards,|Thanks,|Sincerely,|Sent from my iPhone|Cheers,)', '', body, flags=re.IGNORECASE)
+    body = re.sub(r'(Subject:.*|RESTRICTED-INTERNAL|CONFIDENTIAL)', '', body, flags=re.IGNORECASE)
+    return re.sub(r'\n+', '\n', body).strip()
 
-    # 3. Remove signature lines (e.g., "Best regards", "Thanks", etc.)
-    signature_patterns = [
-        r'Best regards,',
-        r'Thanks,',
-        r'Sent from my iPhone',
-        r'Sincerely,',
-        r'Regards,',
-        r'Cheers,'
-    ]
-    
-    for pattern in signature_patterns:
-        body = re.sub(pattern, '', body, flags=re.IGNORECASE)
-
-    # 4. Remove extra white spaces and newlines
-    body = re.sub(r'\n+', '\n', body).strip()
-
-    # 5. Remove "RESTRICTED - INTERNAL" and similar classifications
-    body = re.sub(r'RESTRICTED\s+-\s+INTERNAL', '', body, flags=re.IGNORECASE)
-
-    return body
-
-def convert_to_local_time(email_time):
-    """Convert the email timestamp to local timezone"""
-    # Assuming email_time is a datetime object
-    local_tz = pytz.timezone('Your/LocalTimezone')  # Replace with your local timezone, e.g., 'America/New_York'
-    
-    if isinstance(email_time, str):
-        # If it's a string, try to parse it
-        try:
-            email_time = datetime.strptime(email_time, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            return "Unknown"  # Return 'Unknown' if parsing fails
-
-    # If email_time is already a datetime object, localize it
-    email_time = email_time.replace(tzinfo=pytz.utc)  # Assume input is UTC
-    local_time = email_time.astimezone(local_tz)
-
-    return local_time.strftime("%Y-%m-%d %H:%M:%S")  # Format the output
+def clean_subject(subject):
+    """Clean subject line by removing unnecessary phrases like 'RESTRICTED-INTERNAL'"""
+    subject = re.sub(r'(Subject:|RESTRICTED-INTERNAL|CONFIDENTIAL)', '', subject, flags=re.IGNORECASE)
+    return subject.strip()
 
 def extract_email_content(msg_file_path):
-    """Extract subject, sender, cleaned body, and time from .msg file"""
+    """Extract subject, sender, body, and date from .msg file"""
     msg = Message(msg_file_path)
-    subject = msg.subject
+    subject = clean_subject(msg.subject)
     sender = msg.sender
+    date = convert_to_local_datetime(msg.date)
     body = clean_email_body(msg.body)
+    return subject, sender, body, date
 
-    email_time = msg.date  # Get the raw email date
-    local_email_time = convert_to_local_time(email_time)  # Convert to local time
-    
-    return subject, sender, body, local_email_time
+# Different Summarization Techniques
 
-def summarize_text(text, subject):
-    """Summarize email content using spaCy and clean up any 'Subject:' lines or keywords."""
-    # Remove "Subject: ..." if present in the body
-    text = re.sub(r'Subject:\s?.*', '', text)
-
-    # Remove unwanted keywords like "RESTRICTED - INTERNAL"
-    text = re.sub(r'RESTRICTED\s+-\s+INTERNAL', '', text, flags=re.IGNORECASE)
-
-    # Process with spaCy
+def summarize_with_keywords(text):
     doc = nlp(text)
-    
-    # Extract sentences for summary
-    sentences = [sent.text for sent in doc.sents if len(sent.text.split()) > 5]
-    
-    # Combine first 3 sentences as summary
-    summary = ' '.join(sentences[:3])
+    keywords = [token.text.lower() for token in doc if token.pos_ in ('NOUN', 'VERB')]
+    keywords += [ent.text.lower() for ent in doc.ents]
+    sentence_scores = [(sent.text, sum(1 for word in sent if word.text.lower() in keywords)) for sent in doc.sents]
+    sentence_scores = sorted(sentence_scores, key=lambda x: x[1], reverse=True)
+    return ' '.join([sent[0] for sent in sentence_scores[:3]])
 
-    # Ensure subject isn't repeated in the summary
-    if subject in summary:
-        summary = summary.replace(subject, '')
+def summarize_with_pos_weighting(text):
+    doc = nlp(text)
+    pos_weights = {'NOUN': 2, 'VERB': 2, 'PROPN': 3}
+    sentence_scores = [(sent.text, sum(pos_weights.get(token.pos_, 0) for token in sent)) for sent in doc.sents]
+    sentence_scores are sorted(sentence_scores, key=lambda x: x[1], reverse=True)
+    return ' '.join([sent[0] for sent in sentence_scores[:3]])
 
-    return summary.strip()
+def summarize_with_dependency_parsing(text):
+    doc = nlp(text)
+    sentence_scores = [(sent.text, sum(1 for token in sent if token.dep_ == 'ROOT' and token.pos_ == 'VERB')) for sent in doc.sents]
+    sentence_scores = sorted(sentence_scores, key=lambda x: x[1], reverse=True)
+    return ' '.join([sent[0] for sent in sentence_scores[:3]])
 
+def summarize_with_entities(text):
+    doc = nlp(text)
+    sentence_scores = [(sent.text, sum(1 for ent in sent.ents)) for sent in doc.sents]
+    sentence_scores = sorted(sentence_scores, key=lambda x: x[1], reverse=True)
+    return ' '.join([sent[0] for sent in sentence_scores[:3]])
+
+# Function to build the knowledge base
 def build_knowledge_base():
-    """Read all .msg files and build the knowledge base"""
     global knowledge_base
     for filename in os.listdir(EMAIL_FOLDER):
         if filename.endswith(".msg"):
             filepath = os.path.join(EMAIL_FOLDER, filename)
-            subject, sender, body, time = extract_email_content(filepath)
-            summary = summarize_text(body, subject)  # Pass both body and subject
+            subject, sender, body, date = extract_email_content(filepath)
             knowledge_base.append({
                 'filename': filename,
                 'subject': subject,
                 'sender': sender,
-                'summary': summary,
-                'body': body,  # Save full body for detailed responses
-                'time': time   # Save email sent time
+                'date': date,
+                'summary_keywords': summarize_with_keywords(body),
+                'summary_pos_weighting': summarize_with_pos_weighting(body),
+                'summary_dependency': summarize_with_dependency_parsing(body),
+                'summary_entities': summarize_with_entities(body),
+                'body': body
             })
 
+# Save knowledge base to JSON
 def save_knowledge_base_to_json():
-    """Save the knowledge base to a JSON file"""
     with open(KNOWLEDGE_BASE_FILE, 'w') as json_file:
         json.dump(knowledge_base, json_file, indent=4)
     print(f"Knowledge base saved to {KNOWLEDGE_BASE_FILE}")
 
-def search_knowledge_base(query):
-    """Search the knowledge base for relevant information based on the query using TF-IDF"""
+# Search Knowledge Base using TF-IDF
+def search_knowledge_base(query, summary_type='summary_keywords'):
+    """Search the knowledge base for relevant information based on the query and summary type"""
     responses = []
-
-    # Prepare documents (summaries and subjects)
-    documents = [entry['summary'] + " " + entry['subject'] for entry in knowledge_base]
-
-    # Create TF-IDF vectorizer
+    documents = [entry[summary_type] + " " + entry['subject'] for entry in knowledge_base]
     vectorizer = TfidfVectorizer()
-    tfidf_matrix = vectorizer.fit_transform(documents + [query])  # Add query to the documents for comparison
-
-    # Calculate cosine similarity
+    tfidf_matrix = vectorizer.fit_transform(documents + [query])
     cosine_similarities = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1]).flatten()
-
-    # Get the indices of the most relevant documents
-    relevant_indices = cosine_similarities.argsort()[::-1]  # Sort in descending order
-
+    relevant_indices = cosine_similarities.argsort()[::-1]
     for idx in relevant_indices:
-        if cosine_similarities[idx] > 0:  # Only consider non-zero similarity scores
+        if cosine_similarities[idx] > 0:
             responses.append({
                 'subject': knowledge_base[idx]['subject'],
-                'summary': knowledge_base[idx]['summary'],
-                'body': knowledge_base[idx]['body'],  # Save full body for detailed responses
-                'time': knowledge_base[idx]['time']   # Include the email time
+                'summary': knowledge_base[idx][summary_type],
+                'body': knowledge_base[idx]['body'],
+                'date': knowledge_base[idx]['date']
             })
-
     return responses
+
+# Flask Routes
 
 @app.route('/')
 def index():
-    """Home page for chatbot interaction"""
     return render_template('chat.html')
 
 @app.route('/query', methods=['POST'])
 def query():
-    """API endpoint to handle chatbot queries"""
     user_query = request.form['query']
-    results = search_knowledge_base(user_query)
-    
+    summary_type = request.form.get('summary_type', 'summary_keywords')  # Default to 'summary_keywords'
+    results = search_knowledge_base(user_query, summary_type)
     if results:
-        return jsonify({
-            'status': 'success',
-            'data': results
-        })
+        return jsonify({'status': 'success', 'data': results})
     else:
-        return jsonify({
-            'status': 'fail',
-            'message': 'No relevant information found in the knowledge base.'
-        })
+        return jsonify({'status': 'fail', 'message': 'No relevant information found.'})
 
 if __name__ == '__main__':
-    build_knowledge_base()  # Build the knowledge base when app starts
-    save_knowledge_base_to_json()  # Save to JSON file
+    build_knowledge_base()
+    save_knowledge_base_to_json()
     app.run(debug=True)
