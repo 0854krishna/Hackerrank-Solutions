@@ -24,9 +24,28 @@ def modify_img_src(html_string):
     # Regular expression to match <img> tags with a src attribute, regardless of order
     pattern = r'(<img\b[^>]*?\s+src=["\'])(?!https://confluence/)([^"\']*)(["\'][^>]*?>)'
 
+    def replace_src(match):
+        # Get the original src value
+        original_src = match.group(2)
+        full_url = f'https://confluence/{original_src}'
+
+        # Download the image and save it locally
+        image_response = requests.get(full_url)
+        if image_response.status_code == 200:
+            # Create a local file path
+            image_filename = os.path.join(IMAGE_DIR, os.path.basename(original_src))
+            with open(image_filename, 'wb') as img_file:
+                img_file.write(image_response.content)
+            
+            # Return the modified HTML with the local image path
+            return f'{match.group(1)}{image_filename}{match.group(3)}'
+        else:
+            # If the download fails, return the original match
+            return match.group(0)
+
     # Replace the src with the modified version
-    modified_html = re.sub(pattern, r'\1https://confluence/\2\3', html_string)
-    
+    modified_html = re.sub(pattern, replace_src, html_string)
+
     return modified_html
 
 def clean_email_body(body):
