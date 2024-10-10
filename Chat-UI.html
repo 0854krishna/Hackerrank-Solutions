@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot UI</title>
+    <link rel="stylesheet" href="https://code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f4;
+        }
+        .chat-container {
+            width: 400px; /* Fixed width for square */
+            height: 400px; /* Fixed height for square */
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            background-color: #fff;
+            display: flex;
+            flex-direction: column;
+            padding: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .chatbox {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .userText, .botText {
+            margin: 5px 0;
+        }
+        .userText {
+            text-align: right;
+            color: #1a73e8;
+        }
+        .botText {
+            text-align: left;
+            color: #555;
+        }
+        #userInput {
+            display: flex;
+        }
+        #textInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            margin-right: 5px;
+        }
+        #send {
+            padding: 10px;
+            border: none;
+            border-radius: 5px;
+            background-color: #1a73e8;
+            color: white;
+            cursor: pointer;
+        }
+        #send:hover {
+            background-color: #155a9d;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div id="chatbox" class="chatbox"></div>
+        <div id="userInput">
+            <input id="textInput" type="text" name="msg" placeholder="Type your message..." />
+            <button id="send">Send</button>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        function appendMessage(message, type) {
+            const messageHtml = `<p class="${type}"><span>${message}</span></p>`;
+            $("#chatbox").append(messageHtml);
+            $("#chatbox").scrollTop($("#chatbox")[0].scrollHeight); // Auto-scroll to the bottom
+        }
+
+        $("#send").on('click', function() {
+            const userMessage = $("#textInput").val();
+            if (userMessage.trim()) {
+                appendMessage(userMessage, 'userText'); // Append user message
+                $("#textInput").val(''); // Clear input
+                // Simulate bot response (replace with your bot logic)
+                setTimeout(() => {
+                    appendMessage("This is a simulated bot response!", 'botText'); // Bot's response
+                }, 1000);
+            }
+        });
+
+        $("#textInput").keypress(function(e) {
+            if (e.which == 13) { // Enter key pressed
+                $("#send").click(); // Trigger click event
+                e.preventDefault();
+            }
+        });
+    </script>
+</body>
+</html>
