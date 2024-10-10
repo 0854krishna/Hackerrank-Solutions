@@ -14,7 +14,7 @@ nlp = spacy.load("en_core_web_md")
 app = Flask(__name__)
 
 # Path to folder containing .msg files
-EMAIL_FOLDER = 'path_to_msg_folder'
+EMAIL_FOLDER = 'c:/Users/x01358215/SampleEmails'  # Replace with your folder path
 KNOWLEDGE_BASE_FILE = 'knowledge.json'
 
 # Global variable to store knowledge base (summarized emails)
@@ -52,22 +52,45 @@ def clean_email_body(body):
     # 4. Remove extra white spaces and newlines
     body = re.sub(r'\n+', '\n', body).strip()
 
+    # 5. Remove "RESTRICTED - INTERNAL" and similar classifications
+    body = re.sub(r'RESTRICTED\s+-\s+INTERNAL', '', body, flags=re.IGNORECASE)
+
     return body
 
 def extract_email_content(msg_file_path):
-    """Extract subject, sender, and cleaned body from .msg file"""
+    """Extract subject, sender, cleaned body, and time from .msg file"""
     msg = Message(msg_file_path)
     subject = msg.subject
     sender = msg.sender
     body = clean_email_body(msg.body)
-    return subject, sender, body
+    # Extract the email's time (msg.date) and format it as a string
+    email_time = msg.date.strftime("%Y-%m-%d %H:%M:%S") if msg.date else "Unknown"
+    return subject, sender, body, email_time
 
-def summarize_text(text):
-    """Summarize email content using spaCy"""
+def summarize_text(text, subject):
+    """
+    Summarize email content using spaCy and clean up any 'Subject:' lines or keywords.
+    """
+    # Remove "Subject: ..." if present in the body
+    text = re.sub(r'Subject:\s?.*', '', text)
+
+    # Remove unwanted keywords like "RESTRICTED - INTERNAL"
+    text = re.sub(r'RESTRICTED\s+-\s+INTERNAL', '', text, flags=re.IGNORECASE)
+
+    # Process with spaCy
     doc = nlp(text)
+    
+    # Extract sentences for summary
     sentences = [sent.text for sent in doc.sents if len(sent.text.split()) > 5]
-    summary = ' '.join(sentences[:3])  # Use first 3 sentences as summary
-    return summary
+    
+    # Combine first 3 sentences as summary
+    summary = ' '.join(sentences[:3])
+
+    # Ensure subject isn't repeated in the summary
+    if subject in summary:
+        summary = summary.replace(subject, '')
+
+    return summary.strip()
 
 def build_knowledge_base():
     """Read all .msg files and build the knowledge base"""
@@ -75,14 +98,15 @@ def build_knowledge_base():
     for filename in os.listdir(EMAIL_FOLDER):
         if filename.endswith(".msg"):
             filepath = os.path.join(EMAIL_FOLDER, filename)
-            subject, sender, body = extract_email_content(filepath)
-            summary = summarize_text(body)
+            subject, sender, body, time = extract_email_content(filepath)
+            summary = summarize_text(body, subject)  # Pass both body and subject
             knowledge_base.append({
                 'filename': filename,
                 'subject': subject,
                 'sender': sender,
                 'summary': summary,
-                'body': body  # Save full body for detailed responses
+                'body': body,  # Save full body for detailed responses
+                'time': time   # Save email sent time
             })
 
 def save_knowledge_base_to_json():
@@ -113,7 +137,8 @@ def search_knowledge_base(query):
             responses.append({
                 'subject': knowledge_base[idx]['subject'],
                 'summary': knowledge_base[idx]['summary'],
-                'body': knowledge_base[idx]['body']  # Save full body for detailed responses
+                'body': knowledge_base[idx]['body'],  # Save full body for detailed responses
+                'time': knowledge_base[idx]['time']   # Include the email time
             })
 
     return responses
