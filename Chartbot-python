@@ -6,6 +6,8 @@ from flask import Flask, render_template, request, jsonify
 from extract_msg import Message  # For reading .msg files
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from datetime import datetime
+import pytz  # To handle timezone conversion
 
 # Load the spaCy model (assumed to be installed and available)
 nlp = spacy.load("en_core_web_md")
@@ -21,10 +23,7 @@ KNOWLEDGE_BASE_FILE = 'knowledge.json'
 knowledge_base = []
 
 def clean_email_body(body):
-    """
-    Clean email body by removing common signatures, email chains,
-    and unnecessary phrases.
-    """
+    """Clean email body by removing common signatures, email chains, and unnecessary phrases."""
     # 1. Normalize line endings
     body = body.replace('\r\n', '\n').replace('\r', '\n')
 
@@ -57,20 +56,38 @@ def clean_email_body(body):
 
     return body
 
+def convert_to_local_time(email_time):
+    """Convert the email timestamp to local timezone"""
+    # Assuming email_time is a datetime object
+    local_tz = pytz.timezone('Your/LocalTimezone')  # Replace with your local timezone, e.g., 'America/New_York'
+    
+    if isinstance(email_time, str):
+        # If it's a string, try to parse it
+        try:
+            email_time = datetime.strptime(email_time, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return "Unknown"  # Return 'Unknown' if parsing fails
+
+    # If email_time is already a datetime object, localize it
+    email_time = email_time.replace(tzinfo=pytz.utc)  # Assume input is UTC
+    local_time = email_time.astimezone(local_tz)
+
+    return local_time.strftime("%Y-%m-%d %H:%M:%S")  # Format the output
+
 def extract_email_content(msg_file_path):
     """Extract subject, sender, cleaned body, and time from .msg file"""
     msg = Message(msg_file_path)
     subject = msg.subject
     sender = msg.sender
     body = clean_email_body(msg.body)
-    # Extract the email's time (msg.date) and format it as a string
-    email_time = msg.date.strftime("%Y-%m-%d %H:%M:%S") if msg.date else "Unknown"
-    return subject, sender, body, email_time
+
+    email_time = msg.date  # Get the raw email date
+    local_email_time = convert_to_local_time(email_time)  # Convert to local time
+    
+    return subject, sender, body, local_email_time
 
 def summarize_text(text, subject):
-    """
-    Summarize email content using spaCy and clean up any 'Subject:' lines or keywords.
-    """
+    """Summarize email content using spaCy and clean up any 'Subject:' lines or keywords."""
     # Remove "Subject: ..." if present in the body
     text = re.sub(r'Subject:\s?.*', '', text)
 
