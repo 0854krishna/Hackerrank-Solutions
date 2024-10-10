@@ -20,6 +20,15 @@ KNOWLEDGE_BASE_FILE = 'knowledge.json'
 # Global variable to store knowledge base (summarized emails)
 knowledge_base = []
 
+def modify_img_src(html_string):
+    # Regular expression to match <img> tags and capture the src attribute
+    pattern = r'(<img[^>]+src=["\'])(?!https://confluence/)([^"\']*)(["\'][^>]*>)'
+    
+    # Replace the src with the modified version
+    modified_html = re.sub(pattern, r'\1https://confluence/\2\3', html_string)
+    
+    return modified_html
+
 def clean_email_body(body):
     """Clean email body by removing common signatures, email chains, and unnecessary phrases."""
     body = body.replace('\r\n', '\n').replace('\r', '\n')
