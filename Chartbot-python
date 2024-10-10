@@ -1,25 +1,27 @@
 from datetime import datetime
 import pytz
 
-def convert_rfc1123_to_local(email_time):
-    """Convert RFC 1123 email timestamp to local timezone."""
-    # Replace with your local timezone
-    local_tz = pytz.timezone('America/New_York')  # Example timezone
+def convert_to_local_datetime(date_string):
+    """Convert a date string to LocalDateTime."""
+    # Define the timezone mapping
+    timezone_mapping = {
+        'IST': 'Asia/Kolkata',  # Indian Standard Time
+        # Add more mappings if needed
+    }
+    
+    # Extract the timezone abbreviation (last 3 letters)
+    tz_abbr = date_string.split()[-1]
+    local_tz = timezone_mapping.get(tz_abbr, 'UTC')  # Default to UTC if not found
 
-    # Parse the RFC 1123 formatted string
-    try:
-        # Use strptime to parse the RFC 1123 timestamp
-        email_time = datetime.strptime(email_time, "%a, %d %b %Y %H:%M:%S %z")
-        
-        # Convert to local timezone
-        local_time = email_time.astimezone(local_tz)
+    # Parse the date string without the timezone
+    naive_datetime = datetime.strptime(date_string[:-4].strip(), "%Y-%m-%d %H:%M:%S")
 
-        return local_time.strftime("%Y-%m-%d %H:%M:%S")  # Format the output
-    except Exception as e:
-        print("Error parsing date:", e)
-        return "Unknown"
+    # Localize the naive datetime to the specific timezone
+    localized_datetime = pytz.timezone(local_tz).localize(naive_datetime)
+
+    return localized_datetime
 
 # Example usage
-email_timestamp = "Thu, 09 Mar 2023 23:07:58 +0530"  # Note: +530 should be +0530 for proper parsing
-local_time = convert_rfc1123_to_local(email_timestamp)
-print("Local Time:", local_time)
+date_string = "2023-03-09 23:07:58 IST"
+local_datetime = convert_to_local_datetime(date_string)
+print("LocalDateTime:", local_datetime)
