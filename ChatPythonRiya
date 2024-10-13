@@ -1,0 +1,96 @@
+from flask import Flask, request, jsonify
+import json
+
+app = Flask(__name__)
+
+# Load JSON files into memory (you can also do this dynamically)
+data_files = {
+    "emails": "emails.json",
+    "confluence": "confluence.json",
+    # Add more files as necessary
+}
+
+# Helper function to load JSON data based on category (emails, confluence, etc.)
+def load_json_data(category):
+    if category in data_files:
+        file_name = data_files[category]
+        try:
+            with open(file_name, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading JSON file {file_name}: {e}")
+            return None
+    return None
+
+# Route to handle auto-suggestions
+@app.route('/suggest', methods=['GET'])
+def suggest():
+    user_input = request.args.get('query', '')
+    if not user_input:
+        return jsonify([])
+
+    # Split the input to get category and search term
+    parts = user_input.split(";")
+    if len(parts) < 2:
+        return jsonify([])  # If there isn't enough input, return an empty list
+
+    category = parts[0].strip()  # First part is the category (emails, confluence, etc.)
+    search_term = parts[1].strip()  # Second part is the search query
+
+    # Load the corresponding JSON file
+    data = load_json_data(category)
+    if not data:
+        return jsonify([])  # Return empty if file not found or error
+
+    suggestions = []
+    # Iterate through the data and provide suggestions based on attributes
+    for item in data.get('emails', []):  # Assuming your json contains a list in "emails" key
+        # Example: Suggest based on subject or other attributes
+        if search_term.lower() in item['subject'].lower():
+            suggestions.append(item['subject'])  # Suggest matching subjects
+
+    return jsonify(suggestions)
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
+
+
+
+--------------------------
+$(document).ready(function() {
+    // Trigger this when the user types
+    $('#textInput').on('input', function() {
+        var query = $(this).val();
+        
+        // Make a GET request to the Flask backend
+        if (query.includes(';')) {  // Only search if the query contains a semicolon
+            $.get('/suggest', { query: query }, function(data) {
+                // Clear the current suggestions
+                $('#suggestions').empty();
+                
+                // Append new suggestions
+                data.forEach(function(suggestion) {
+                    $('#suggestions').append('<li>' + suggestion + '</li>');
+                });
+            });
+        }
+    });
+    
+    // Optionally, handle click events for suggestions
+    $(document).on('click', '#suggestions li', function() {
+        var selectedText = $(this).text();
+        $('#textInput').val(selectedText + ': '); // Insert the suggestion into the input
+        $('#suggestions').empty();  // Clear suggestions after selection
+    });
+});
+
+
+
+-------------------------------------
+<div id="userInput">
+    <input id="textInput" type="text" name="msg" placeholder="Type your message...">
+    <button id="send">Send</button>
+</div>
+<ul id="suggestions"></ul>
