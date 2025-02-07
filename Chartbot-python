@@ -1,4 +1,50 @@
-from datetime import datetime
+
+Sub CartesianProduct()
+    Dim ws1 As Worksheet, ws2 As Worksheet, wsResult As Worksheet
+    Dim rowCount1 As Long, rowCount2 As Long
+    Dim colCount1 As Long, colCount2 As Long
+    Dim i As Long, j As Long, resultRow As Long
+
+    ' Set references to sheets (Change names if needed)
+    Set ws1 = ThisWorkbook.Sheets("Sheet1")
+    Set ws2 = ThisWorkbook.Sheets("Sheet2")
+
+    ' Get row and column counts
+    rowCount1 = ws1.Cells(Rows.Count, 1).End(xlUp).Row
+    rowCount2 = ws2.Cells(Rows.Count, 1).End(xlUp).Row
+    colCount1 = ws1.Cells(1, Columns.Count).End(xlToLeft).Column
+    colCount2 = ws2.Cells(1, Columns.Count).End(xlToLeft).Column
+
+    ' Create new sheet for results (delete if it already exists)
+    On Error Resume Next
+    Application.DisplayAlerts = False
+    Sheets("Result").Delete
+    Application.DisplayAlerts = True
+    On Error GoTo 0
+    Set wsResult = ThisWorkbook.Sheets.Add
+    wsResult.Name = "Result"
+
+    ' Copy headers from both sheets
+    ws1.Range(ws1.Cells(1, 1), ws1.Cells(1, colCount1)).Copy wsResult.Cells(1, 1)
+    ws2.Range(ws2.Cells(1, 1), ws2.Cells(1, colCount2)).Copy wsResult.Cells(1, colCount1 + 1)
+
+    ' Generate Cartesian product
+    resultRow = 2
+    For i = 2 To rowCount1  ' Start from row 2 to skip headers
+        For j = 2 To rowCount2
+            ' Copy row from Sheet1
+            ws1.Range(ws1.Cells(i, 1), ws1.Cells(i, colCount1)).Copy wsResult.Cells(resultRow, 1)
+            ' Copy row from Sheet2
+            ws2.Range(ws2.Cells(j, 1), ws2.Cells(j, colCount2)).Copy wsResult.Cells(resultRow, colCount1 + 1)
+            resultRow = resultRow + 1
+        Next j
+    Next i
+
+    MsgBox "Cartesian product generated successfully in 'Result' sheet!", vbInformation
+End Sub
+
+datetime import datetime
+
 import pytz
 
 def convert_to_local_datetime(date_string):
