@@ -1,5 +1,23 @@
 
-Sub CartesianProduct()
+import pandas as pd
+
+# Load the Excel file
+file_path = "data.xlsx"  # Change to your file name
+sheet1_name = "Sheet1"   # Change if needed
+sheet2_name = "Sheet2"   # Change if needed
+
+# Read both sheets
+df1 = pd.read_excel(file_path, sheet_name=sheet1_name)
+df2 = pd.read_excel(file_path, sheet_name=sheet2_name)
+
+# Create Cartesian product (cross join)
+df_result = df1.merge(df2, how="cross")
+
+# Save to a new Excel file
+output_file = "result.xlsx"
+df_result.to_excel(output_file, index=False)
+
+print(f"Result saved to {output_file} with {len(df_result)} rows.")Sub CartesianProduct()
     Dim ws1 As Worksheet, ws2 As Worksheet, wsResult As Worksheet
     Dim rowCount1 As Long, rowCount2 As Long
     Dim colCount1 As Long, colCount2 As Long
